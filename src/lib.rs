@@ -28,6 +28,45 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn boolean(b: bool) -> Value {
+        Value::Boolean(b)
+    }
+    pub fn float(f: f32) -> Value {
+        Value::Float(f)
+    }
+    pub fn double(d: f64) -> Value {
+        Value::Double(d)
+    }
+    pub fn integer<T: Into<BigInt>>(i: T) -> Value {
+        Value::Integer(i.into())
+    }
+    pub fn binary<'a, T: Into<&'a [u8]>>(b: T) -> Value {
+        Value::Binary(b.into().to_vec())
+    }
+    pub fn string<'a, T: Into<&'a str>>(s: T) -> Value {
+        Value::String(s.into().to_string())
+    }
+    pub fn symbol<'a, T: Into<&'a str>>(s: T) -> Value {
+        Value::Symbol(s.into().to_string())
+    }
+    pub fn dictionary(mut d: Vec<(Value, Value)>) -> Value {
+        d.sort();
+        Value::Dictionary(d)
+    }
+    pub fn sequence(s: Vec<Value>) -> Value {
+        Value::Sequence(s)
+    }
+    pub fn record(label: Value, fields: Vec<Value>) -> Value {
+        Value::Record {
+            label: Box::new(label),
+            fields,
+        }
+    }
+    pub fn set(mut s: Vec<Value>) -> Value {
+        s.sort();
+        Value::Set(s)
+    }
+
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.to_vec().cmp(other.to_vec().as_ref())
     }
@@ -125,7 +164,13 @@ impl FromStr for Value {
         value(s.as_bytes())
             .finish()
             .map(|(_, res)| res)
-            .map_err(|e| Error::Parse(format!("{:?}", e)))
+            .map_err(|e| {
+                Error::Parse(format!(
+                    "near {}: {}",
+                    String::from_utf8_lossy(e.input),
+                    e.code.description()
+                ))
+            })
     }
 }
 
@@ -331,78 +376,76 @@ impl Ord for Value {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs::File, io::Read, path::PathBuf};
+
+    use nom::AsBytes;
+
     use super::*;
 
     #[test]
     fn try_from_slice() {
-        assert_eq!(b"t".as_slice().try_into(), Ok(Value::Boolean(true)),);
-        assert_eq!(b"f".as_slice().try_into(), Ok(Value::Boolean(false)),);
+        assert_eq!(b"t".as_slice().try_into(), Ok(Value::boolean(true)),);
+        assert_eq!(b"f".as_slice().try_into(), Ok(Value::boolean(false)),);
         assert_eq!(
             b"F\x3d\xcc\xcc\xcd".as_slice().try_into(),
-            Ok(Value::Float(0.1)),
+            Ok(Value::float(0.1)),
         );
         assert_eq!(
             b"D\x3f\xb9\x99\x99\x99\x99\x99\x9a".as_slice().try_into(),
-            Ok(Value::Double(0.1)),
+            Ok(Value::double(0.1)),
         );
     }
 
     #[test]
+    fn invalid() {
+        // TODO: improve nom error messages
+        assert_eq!(
+            Value::from_str("nope"),
+            Err::<Value, Error>(Error::Parse("near nope: Tag".to_string()))
+        )
+    }
+
+    #[test]
     fn from_str() {
-        assert_eq!(Value::from_str("t"), Ok(Value::Boolean(true)),);
-        assert_eq!(Value::from_str("f"), Ok(Value::Boolean(false)),);
-        assert_eq!(Value::from_str("42+"), Ok(Value::Integer(42.into())),);
-        assert_eq!(Value::from_str("42-"), Ok(Value::Integer((-42).into())),);
+        assert_eq!(Value::from_str("t"), Ok(Value::boolean(true)),);
+        assert_eq!(Value::from_str("f"), Ok(Value::boolean(false)),);
+        assert_eq!(Value::from_str("42+"), Ok(Value::integer(42)),);
+        assert_eq!(Value::from_str("42-"), Ok(Value::integer(-42)),);
         assert_eq!(
             Value::from_str("5:hello"),
-            Ok(Value::Binary(b"hello".to_vec()))
+            Ok(Value::binary(b"hello".as_slice()))
         );
-        assert_eq!(
-            Value::from_str("3\"foo"),
-            Ok(Value::String("foo".to_string()))
-        );
-        assert_eq!(
-            Value::from_str("3'foo"),
-            Ok(Value::Symbol("foo".to_string()))
-        );
+        assert_eq!(Value::from_str("3\"foo"), Ok(Value::string("foo")));
+        assert_eq!(Value::from_str("3'foo"), Ok(Value::symbol("foo")));
         assert_eq!(
             Value::from_str("[1+2+3+]"),
-            Ok(Value::Sequence(vec![
-                Value::Integer(1.into()),
-                Value::Integer(2.into()),
-                Value::Integer(3.into()),
+            Ok(Value::sequence(vec![
+                Value::integer(1),
+                Value::integer(2),
+                Value::integer(3),
             ]))
         );
         assert_eq!(
             Value::from_str("{3\"goo4\"muck3\"foo3\"bar}"),
             Ok(Value::Dictionary(vec![
-                (
-                    Value::String("foo".to_string()),
-                    Value::String("bar".to_string())
-                ),
-                (
-                    Value::String("goo".to_string()),
-                    Value::String("muck".to_string())
-                )
+                (Value::string("foo"), Value::string("bar")),
+                (Value::string("goo"), Value::string("muck"))
             ]))
         );
         assert_eq!(
             Value::from_str("<6:person5:Alice30+t>"),
-            Ok(Value::Record {
-                label: Box::new(Value::Binary(b"person".to_vec())),
-                fields: vec![
-                    Value::Binary(b"Alice".to_vec()),
-                    Value::Integer(30.into()),
-                    Value::Boolean(true),
+            Ok(Value::record(
+                Value::binary(b"person".as_slice()),
+                vec![
+                    Value::binary(b"Alice".as_slice()),
+                    Value::integer(30),
+                    Value::boolean(true),
                 ]
-            })
+            ))
         );
         assert_eq!(
             Value::from_str("#3\"foo3\"bar$"),
-            Ok(Value::Set(vec![
-                Value::String("bar".to_string()),
-                Value::String("foo".to_string())
-            ]))
+            Ok(Value::set(vec![Value::string("bar"), Value::string("foo")]))
         );
     }
 
@@ -428,5 +471,67 @@ mod tests {
                 s
             );
         }
+    }
+
+    #[test]
+    fn parse_zoo() {
+        let zoo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata")
+            .join("zoo.bin");
+        let mut zoo_file = File::open(zoo_path).expect("open testdata/zoo.bin");
+        let mut buf = vec![];
+        zoo_file
+            .read_to_end(&mut buf)
+            .expect("read testdata/zoo.bin");
+        let zoo_actual: Value = buf.as_bytes().try_into().expect("parse zoo.bin");
+        let zoo_expected = Value::record(
+            Value::binary(b"zoo".as_slice()),
+            vec![
+                Value::string("The Grand Menagerie"),
+                Value::sequence(vec![
+                    Value::dictionary(vec![
+                        (Value::symbol("species"), Value::binary(b"cat".as_slice())),
+                        (Value::symbol("name"), Value::string("Tabatha")),
+                        (Value::symbol("age"), Value::integer(12)),
+                        (Value::symbol("weight"), Value::double(8.2)),
+                        (Value::symbol("alive?"), Value::boolean(true)),
+                        (
+                            Value::symbol("eats"),
+                            Value::set(vec![
+                                Value::binary(b"mice".as_slice()),
+                                Value::binary(b"fish".as_slice()),
+                                Value::binary(b"kibble".as_slice()),
+                            ]),
+                        ),
+                    ]),
+                    Value::dictionary(vec![
+                        (
+                            Value::symbol("species"),
+                            Value::binary(b"monkey".as_slice()),
+                        ),
+                        (Value::symbol("name"), Value::string("George")),
+                        (Value::symbol("age"), Value::integer(6)),
+                        (Value::symbol("weight"), Value::double(17.24)),
+                        (Value::symbol("alive?"), Value::boolean(false)),
+                        (
+                            Value::symbol("eats"),
+                            Value::set(vec![
+                                Value::binary(b"bananas".as_slice()),
+                                Value::binary(b"insects".as_slice()),
+                            ]),
+                        ),
+                    ]),
+                    Value::dictionary(vec![
+                        (Value::symbol("species"), Value::binary(b"ghost".as_slice())),
+                        (Value::symbol("name"), Value::string("Casper")),
+                        (Value::symbol("age"), Value::integer(-12)),
+                        (Value::symbol("weight"), Value::double(-34.5)),
+                        (Value::symbol("alive?"), Value::boolean(false)),
+                        (Value::symbol("eats"), Value::set(vec![])),
+                    ]),
+                ]),
+            ],
+        );
+        assert_eq!(zoo_expected, zoo_actual);
     }
 }
