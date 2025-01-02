@@ -1,6 +1,6 @@
 [package]
 name = "ocapn-syrup"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["Casey Marshall <crates@cmars.tech>"]
 description = "Syrup is a lightweight and easy-to-implement data serialization format."
