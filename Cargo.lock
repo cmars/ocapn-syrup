@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "ocapn-syrup"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nom",
  "num-bigint",

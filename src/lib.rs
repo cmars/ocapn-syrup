@@ -1,3 +1,4 @@
+use std::hash::Hash;
 use std::str::FromStr;
 
 use nom::{
@@ -11,7 +12,7 @@ use nom::{
 };
 use num_bigint::{BigInt, Sign};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Value {
     Boolean(bool),
     Float(f32),
@@ -27,6 +28,10 @@ pub enum Value {
 }
 
 impl Value {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.to_vec().cmp(other.to_vec().as_ref())
+    }
+
     pub fn to_vec(&self) -> Vec<u8> {
         match self {
             Value::Boolean(true) => [b't'].to_vec(),
@@ -264,11 +269,13 @@ fn sequence_value(input: &[u8]) -> IResult<&[u8], Value> {
 
 fn dictionary_value(input: &[u8]) -> IResult<&[u8], Value> {
     context(
-        "sequence",
+        "dictionary",
         preceded(tag("{"), many_till(pair(value, value), tag("}"))),
     )(input)
-    .map(|(next_input, res)| (next_input, Value::Dictionary(res.0)))
-    // TODO: canonicalized
+    .map(|(next_input, mut res)| {
+        res.0.sort();
+        (next_input, Value::Dictionary(res.0))
+    })
 }
 
 fn record_value(input: &[u8]) -> IResult<&[u8], Value> {
@@ -288,8 +295,38 @@ fn record_value(input: &[u8]) -> IResult<&[u8], Value> {
 }
 
 fn set_value(input: &[u8]) -> IResult<&[u8], Value> {
-    context("sequence", preceded(tag("#"), many_till(value, tag("$"))))(input)
-        .map(|(next_input, res)| (next_input, Value::Set(res.0)))
+    context("sequence", preceded(tag("#"), many_till(value, tag("$"))))(input).map(
+        |(next_input, mut res)| {
+            res.0.sort();
+            (next_input, Value::Set(res.0))
+        },
+    )
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        return self.cmp(other).is_eq();
+    }
+}
+
+impl Eq for Value {}
+
+impl Hash for Value {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.to_vec().hash(state);
+    }
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Value {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.cmp(other)
+    }
 }
 
 #[cfg(test)]
@@ -337,11 +374,17 @@ mod tests {
             ]))
         );
         assert_eq!(
-            Value::from_str("{3\"foo3\"bar}"),
-            Ok(Value::Dictionary(vec![(
-                Value::String("foo".to_string()),
-                Value::String("bar".to_string())
-            )]))
+            Value::from_str("{3\"goo4\"muck3\"foo3\"bar}"),
+            Ok(Value::Dictionary(vec![
+                (
+                    Value::String("foo".to_string()),
+                    Value::String("bar".to_string())
+                ),
+                (
+                    Value::String("goo".to_string()),
+                    Value::String("muck".to_string())
+                )
+            ]))
         );
         assert_eq!(
             Value::from_str("<6:person5:Alice30+t>"),
@@ -357,8 +400,8 @@ mod tests {
         assert_eq!(
             Value::from_str("#3\"foo3\"bar$"),
             Ok(Value::Set(vec![
-                Value::String("foo".to_string()),
-                Value::String("bar".to_string())
+                Value::String("bar".to_string()),
+                Value::String("foo".to_string())
             ]))
         );
     }
@@ -374,9 +417,9 @@ mod tests {
             "3\"foo",
             "4'none",
             "[1+2+3+]",
-            "{3\"foo3\"bar}",
+            "{3\"foo3\"bar3\"goo4\"muck}",
             "<6:person5:Alice30+t>",
-            "#3\"foo3\"bar$",
+            "#3\"bar3\"foo$",
         ] {
             assert_eq!(
                 Value::from_str(s).unwrap().to_vec(),
