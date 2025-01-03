@@ -12,3 +12,4 @@ license = "MPL-2.0"
 [dependencies]
 nom = "7"
 num-bigint = "0.4.6"
+serde = { version = "1.0.217", features = ["derive"] }
