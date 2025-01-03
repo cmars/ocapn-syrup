@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use serde::{de, ser, Serialize};
+use serde::{ser, Serialize};
 
 use crate::format::{Error, Result, Value};
 
@@ -10,16 +10,11 @@ impl ser::Error for Error {
     }
 }
 
-impl de::Error for Error {
-    fn custom<T: Display>(msg: T) -> Self {
-        Error::Message(msg.to_string())
-    }
-}
-
 pub struct Serializer {
     output: Vec<u8>,
 }
 
+/// Serialize a rust value to a syrup-formatted representation.
 pub fn to_vec<T>(value: &T) -> Result<Vec<u8>>
 where
     T: Serialize,
@@ -406,6 +401,7 @@ fn test_struct() {
     };
     let expected = br#"<4'Test{3'int1+3'seq[1"a1"b]}>"#.to_vec();
     assert_eq!(to_vec(&test).unwrap(), expected);
+    assert!(matches!(crate::format::value(expected.as_slice()), Ok(_)));
 }
 
 #[test]
@@ -421,16 +417,20 @@ fn test_enum() {
     let u = E::Unit;
     let expected = br#"<1'E4'Unit>"#.to_vec();
     assert_eq!(to_vec(&u).unwrap(), expected,);
+    assert!(matches!(crate::format::value(expected.as_slice()), Ok(_)));
 
     let n = E::Newtype(1);
     let expected = br#"<1'E7'Newtype1+>"#.to_vec();
     assert_eq!(to_vec(&n).unwrap(), expected);
+    assert!(matches!(crate::format::value(expected.as_slice()), Ok(_)));
 
     let t = E::Tuple(1, 2);
     let expected = br#"<1'E5'Tuple1+2+>"#.to_vec();
     assert_eq!(to_vec(&t).unwrap(), expected);
+    assert!(matches!(crate::format::value(expected.as_slice()), Ok(_)));
 
     let s = E::Struct { a: 1 };
     let expected = br#"<1'E6'Struct{1'a1+}>"#.to_vec();
     assert_eq!(to_vec(&s).unwrap(), expected);
+    assert!(matches!(crate::format::value(expected.as_slice()), Ok(_)));
 }

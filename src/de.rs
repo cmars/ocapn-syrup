@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{fmt::Display, marker::PhantomData};
 
 use num_bigint::Sign;
 use serde::{
@@ -7,6 +7,12 @@ use serde::{
 };
 
 use crate::format::{value, Error, Result, Value};
+
+impl de::Error for Error {
+    fn custom<T: Display>(msg: T) -> Self {
+        Error::Message(msg.to_string())
+    }
+}
 
 pub struct Deserializer<'de> {
     input: &'de [u8],
@@ -20,6 +26,7 @@ impl<'de> Deserializer<'de> {
             pending: vec![],
         }
     }
+
     fn visit_value<V>(&mut self, visitor: V, value: Value) -> Result<V::Value>
     where
         V: Visitor<'de>,
@@ -84,11 +91,27 @@ impl<'de> Deserializer<'de> {
     }
 }
 
+/// Deserialize a rust value from a byte-slice containing syrup-formatted data.
 pub fn try_from_bytes<'a, T>(b: &'a [u8]) -> Result<T>
 where
     T: Deserialize<'a>,
 {
     let mut deserializer = Deserializer::from_bytes(b);
+    let t = T::deserialize(&mut deserializer)?;
+    if deserializer.input.is_empty() {
+        Ok(t)
+    } else {
+        Err(Error::Message("trailing values".to_string()))
+    }
+}
+
+/// Deserialize a rust value from a parsed representation of syrup-formatted data.
+pub fn from_value<'a, T>(v: Value) -> Result<T>
+where
+    T: Deserialize<'a>,
+{
+    let mut deserializer = Deserializer::from_bytes(&[]);
+    deserializer.pending.push(v);
     let t = T::deserialize(&mut deserializer)?;
     if deserializer.input.is_empty() {
         Ok(t)
@@ -274,6 +297,35 @@ fn test_simple_types() {
     assert_eq!(
         Ok(vec![vec![1, 2, 3], vec![4, 5, 6]]),
         try_from_bytes::<Vec<Vec<u64>>>(br#"[[1+2+3+][4+5+6+]]"#.as_slice())
+    );
+}
+
+#[test]
+fn test_from_value() {
+    #[derive(Deserialize, PartialEq, Debug)]
+    struct Test {
+        int: u32,
+        seq: Vec<String>,
+    }
+
+    assert_eq!(
+        Ok(Test {
+            int: 42,
+            seq: vec!["foo".to_owned(), "bar".to_owned()]
+        }),
+        from_value::<Test>(Value::Record {
+            label: Box::new(Value::Symbol("Test".to_owned())),
+            fields: vec![Value::Dictionary(vec![
+                (Value::Symbol("int".to_owned()), Value::Integer(42.into())),
+                (
+                    Value::Symbol("seq".to_owned()),
+                    Value::Sequence(vec![
+                        Value::String("foo".to_owned()),
+                        Value::String("bar".to_owned())
+                    ])
+                )
+            ])]
+        })
     );
 }
 
